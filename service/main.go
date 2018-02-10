@@ -21,7 +21,7 @@ const (
 	PROJECT_ID = "crested-primacy-194222"
 	BT_INSTANCE = "around-post"
 	// Needs to update this URL if you deploy it to cloud.
-	ES_URL = "http://35.227.105.35:9200"
+	ES_URL = "http://35.196.6.170:9200"
 )
 
 
