@@ -9,12 +9,14 @@ import (
 	"strconv"
 	"reflect"
 	"context"
+	"io"
     "cloud.google.com/go/bigtable"
 	"strings"
 	"github.com/pborman/uuid"
 	"github.com/auth0/go-jwt-middleware"
 	"github.com/dgrijalva/jwt-go"
 	"github.com/gorilla/mux"
+	"cloud.google.com/go/storage"
 )
 
 const (
@@ -26,6 +28,7 @@ const (
 	BT_INSTANCE = "around-post"
 	// Needs to update this URL if you deploy it to cloud.
 	ES_URL = "http://35.229.78.216:9200/"
+	BUCKET_NAME = "post-image-217516"
 )
 
 
@@ -38,6 +41,7 @@ type Post struct {
 	User string `json:"user"`
 	Message string `json:"message"`
 	Location Location `json:"location"`
+	Url string `json:"url"`
 }
 
 var mySigningKey = []byte("secret")
@@ -97,43 +101,88 @@ func main() {
 
 
 func handlerPost (w http.ResponseWriter, r *http.Request) {
-	fmt.Print("Received a post request")
-	var p Post
-	decoder := json.NewDecoder(r.Body)
-	if err := decoder.Decode(&p); err != nil {
-		panic(err)
-		return
-	}
-	user := r.Context().Value("user")
-	claims := user.(*jwt.Token).Claims
-	username := claims.(jwt.MapClaims)["username"]
-	p.User = username.(string)
-	id := uuid.New()
-	// Save to ES. post
-	saveToES(&p, id)
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type,Authorization")
 
-	// Save to BT. post
+
+	// 32 << 20 is the maxMemory param for ParseMultipartForm, equals to 32MB (1MB = 1024 * 1024 bytes = 2^20 bytes)
+	// After you call ParseMultipartForm, the file will be saved in the server memory with maxMemory size.
+	// If the file size is larger than maxMemory, the rest of the data will be saved in a system temporary file.
+	r.ParseMultipartForm(32 << 20)
+
+	// Parse from form data.
+	fmt.Printf("Received one post request %s\n", r.FormValue("message"))
+	lat, _ := strconv.ParseFloat(r.FormValue("lat"), 64)
+	lon, _ := strconv.ParseFloat(r.FormValue("lon"), 64)
+	p := &Post{
+			User:    "1111",
+			Message: r.FormValue("message"),
+			Location: Location{
+				Lat: lat,
+				Lon: lon,
+			},
+	}
+
+	id := uuid.New()
+
+	file, _, err := r.FormFile("image")
+	if err != nil {
+			http.Error(w, "Image is not available", http.StatusInternalServerError)
+			fmt.Printf("Image is not available %v.\n", err)
+			return
+	}
+	defer file.Close()
+
 	ctx := context.Background()
-	// update project name here
-	bt_client, err := bigtable.NewClient(ctx, PROJECT_ID, BT_INSTANCE)
+
+	// replace it with your real bucket name.
+	_, attrs, err := saveToGCS(ctx, file, BUCKET_NAME, id)
 	if err != nil {
-		panic(err)
-		return
+			http.Error(w, "GCS is not setup", http.StatusInternalServerError)
+			fmt.Printf("GCS is not setup %v\n", err)
+			return
 	}
-	tbl := bt_client.Open("post")
-	mut := bigtable.NewMutation()
-	t := bigtable.Now()
-	mut.Set("post", "user", t, []byte(p.User))
-	mut.Set("post", "message", t, []byte(p.Message))
-	mut.Set("location", "lat", t, []byte(strconv.FormatFloat(p.Location.Lat, 'f', -1, 64)))
-	mut.Set("location", "lon", t, []byte(strconv.FormatFloat(p.Location.Lon, 'f', -1, 64)))
-	// erro handling for debug
-	err = tbl.Apply(ctx, id, mut)
+
+	// Update the media link after saving to GCS.
+	p.Url = attrs.MediaLink
+
+	// Save to ES.
+	saveToES(p, id)
+
+	// Save to BigTable.
+	// saveToBT(p, id)
+}
+func saveToGCS(ctx context.Context, r io.Reader, bucket, name string) (*storage.ObjectHandle, *storage.ObjectAttrs, error) {
+	client, err := storage.NewClient(ctx)
 	if err != nil {
-		panic(err)
-		return
+			return nil, nil, err
 	}
-	fmt.Printf("Post is saved to BigTable: %s\n", p.Message)
+	defer client.Close()
+
+	bh := client.Bucket(bucket)
+	// Next check if the bucket exists
+	if _, err = bh.Attrs(ctx); err != nil {
+			return nil, nil, err
+	}
+
+	obj := bh.Object(name)
+	w := obj.NewWriter(ctx)
+	if _, err := io.Copy(w, r); err != nil {
+			return nil, nil, err
+	}
+	if err := w.Close(); err != nil {
+			return nil, nil, err
+	}
+
+	// set access all user read premission 
+	if err := obj.ACL().Set(ctx, storage.AllUsers, storage.RoleReader); err != nil {
+			return nil, nil, err
+	}
+
+	attrs, err := obj.Attrs(ctx)
+	fmt.Printf("Post is saved to GCS: %s\n", attrs.MediaLink)
+	return obj, attrs, err
 }
 
 // Save a post to ElasticSearch
@@ -159,6 +208,31 @@ func saveToES(p *Post, id string) {
 	}
 
 	fmt.Printf("Post is saved to Index: %s\n", p.Message)
+}
+
+// Save a post to BigTable
+func saveToBT(p *Post, id string) {
+	ctx := context.Background()
+	// update project name here
+	bt_client, err := bigtable.NewClient(ctx, PROJECT_ID, BT_INSTANCE)
+	if err != nil {
+		panic(err)
+		return
+	}
+	tbl := bt_client.Open("post")
+	mut := bigtable.NewMutation()
+	t := bigtable.Now()
+	mut.Set("post", "user", t, []byte(p.User))
+	mut.Set("post", "message", t, []byte(p.Message))
+	mut.Set("location", "lat", t, []byte(strconv.FormatFloat(p.Location.Lat, 'f', -1, 64)))
+	mut.Set("location", "lon", t, []byte(strconv.FormatFloat(p.Location.Lon, 'f', -1, 64)))
+	// erro handling for debug
+	err = tbl.Apply(ctx, id, mut)
+	if err != nil {
+		panic(err)
+		return
+	}
+	fmt.Printf("Post is saved to BigTable: %s\n", p.Message)
 }
 
 
