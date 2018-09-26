@@ -105,7 +105,19 @@ func handlerPost (w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("Access-Control-Allow-Headers", "Content-Type,Authorization")
 
+	if r.Method != "POST" {
+		return
+	}
 
+	user := r.Context().Value("user")
+	if user == nil {
+		m := fmt.Sprintf("Unable to find user in context")
+		fmt.Println(m)
+		http.Error(w, m, http.StatusBadRequest)
+		return
+	}
+	claims := user.(*jwt.Token).Claims
+	username := claims.(jwt.MapClaims)["username"]
 	// 32 << 20 is the maxMemory param for ParseMultipartForm, equals to 32MB (1MB = 1024 * 1024 bytes = 2^20 bytes)
 	// After you call ParseMultipartForm, the file will be saved in the server memory with maxMemory size.
 	// If the file size is larger than maxMemory, the rest of the data will be saved in a system temporary file.
@@ -116,12 +128,12 @@ func handlerPost (w http.ResponseWriter, r *http.Request) {
 	lat, _ := strconv.ParseFloat(r.FormValue("lat"), 64)
 	lon, _ := strconv.ParseFloat(r.FormValue("lon"), 64)
 	p := &Post{
-			User:    "1111",
-			Message: r.FormValue("message"),
-			Location: Location{
-				Lat: lat,
-				Lon: lon,
-			},
+		User:    username.(string),
+		Message: r.FormValue("message"),
+		Location: Location{
+			Lat: lat,
+			Lon: lon,
+		},
 	}
 
 	id := uuid.New()
