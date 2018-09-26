@@ -9,8 +9,12 @@ import (
 	"strconv"
 	"reflect"
 	"github.com/pborman/uuid"
-	"context"
-	"cloud.google.com/go/bigtable"
+	//"context"
+	//"cloud.google.com/go/bigtable"
+	"github.com/auth0/go-jwt-middleware"
+	"github.com/dgrijalva/jwt-go"
+	"github.com/gorilla/mux"
+
 )
 
 const (
@@ -21,7 +25,7 @@ const (
 	PROJECT_ID = "crested-primacy-194222"
 	BT_INSTANCE = "around-post"
 	// Needs to update this URL if you deploy it to cloud.
-	ES_URL = "http://35.196.6.170:9200"
+	ES_URL = "http://35.229.78.216:9200/"
 )
 
 
@@ -36,6 +40,7 @@ type Post struct {
 	Location Location `json:"location"`
 }
 
+var mySigningKey = []byte("secret")
 
 func main() {
 	// Create a client
@@ -72,8 +77,21 @@ func main() {
 	}
 
 	fmt.Println("started-service")
-	http.HandleFunc("/post", handlerPost)
-	http.HandleFunc("/search", handlerSearch)
+	r := mux.NewRouter()
+
+	var jwtMiddleware = jwtmiddleware.New(jwtmiddleware.Options{
+		ValidationKeyGetter: func(token *jwt.Token) (interface{}, error) {
+			return mySigningKey, nil
+		},
+		SigningMethod: jwt.SigningMethodHS256,
+	})
+
+	r.Handle("/post", jwtMiddleware.Handler(http.HandlerFunc(handlerPost))).Methods("POST")
+	r.Handle("/search", jwtMiddleware.Handler(http.HandlerFunc(handlerSearch))).Methods("GET")
+	r.Handle("/login", http.HandlerFunc(loginHandler)).Methods("POST")
+	r.Handle("/signup", http.HandlerFunc(signupHandler)).Methods("POST")
+
+	http.Handle("/", r)
 	log.Fatal(http.ListenAndServe(":8080", nil))
 }
 
@@ -86,31 +104,35 @@ func handlerPost (w http.ResponseWriter, r *http.Request) {
 		panic(err)
 		return
 	}
+	user := r.Context().Value("user")
+	claims := user.(*jwt.Token).Claims
+	username := claims.(jwt.MapClaims)["username"]
+	p.User = username.(string)
 	id := uuid.New()
 	// Save to ES. post
 
-	ctx := context.Background()
-	// you must update project name here
-	bt_client, err := bigtable.NewClient(ctx, PROJECT_ID, BT_INSTANCE)
-	if err != nil {
-		panic(err)
-		return
-	}
+	//ctx := context.Background()
+	//// you must update project name here
+	//bt_client, err := bigtable.NewClient(ctx, PROJECT_ID, BT_INSTANCE)
+	//if err != nil {
+	//	panic(err)
+	//	return
+	//}
 
 	saveToES(&p, id)
-	tbl := bt_client.Open("post")
-	mut := bigtable.NewMutation()
-	t := bigtable.Now()
-	mut.Set("post", "user", t, []byte(p.User))
-	mut.Set("post", "message", t, []byte(p.Message))
-	mut.Set("location", "lat", t, []byte(strconv.FormatFloat(p.Location.Lat, 'f', -1, 64)))
-	mut.Set("location", "lon", t, []byte(strconv.FormatFloat(p.Location.Lon, 'f', -1, 64)))
-	err = tbl.Apply(ctx, id, mut)
-	if err != nil {
-		panic(err)
-		return
-	}
-	fmt.Printf("Post is saved to BigTable: %s\n", p.Message)
+	//tbl := bt_client.Open("post")
+	//mut := bigtable.NewMutation()
+	//t := bigtable.Now()
+	//mut.Set("post", "user", t, []byte(p.User))
+	//mut.Set("post", "message", t, []byte(p.Message))
+	//mut.Set("location", "lat", t, []byte(strconv.FormatFloat(p.Location.Lat, 'f', -1, 64)))
+	//mut.Set("location", "lon", t, []byte(strconv.FormatFloat(p.Location.Lon, 'f', -1, 64)))
+	//err = tbl.Apply(ctx, id, mut)
+	//if err != nil {
+	//	panic(err)
+	//	return
+	//}
+	//fmt.Printf("Post is saved to BigTable: %s\n", p.Message)
 }
 
 // Save a post to ElasticSearch
