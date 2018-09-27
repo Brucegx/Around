@@ -10,7 +10,6 @@ import (
 	"reflect"
 	"context"
 	"io"
-	"os"
 	"time"
     "cloud.google.com/go/bigtable"
 	"strings"
