@@ -56,6 +56,12 @@ func addUser(username, password string) bool {
 		return false
 	}
 
+user := &User{
+		Username: username,
+		Password: password,
+	}
+
+	// Search with a term query
 	termQuery := elastic.NewTermQuery("username", username)
 	queryResult, err := es_client.Search().
 		Index(INDEX).
@@ -66,23 +72,22 @@ func addUser(username, password string) bool {
 		fmt.Printf("ES query failed %v\n", err)
 		return false
 	}
+
 	if queryResult.TotalHits() > 0 {
+		fmt.Printf("User %s has existed, cannot create duplicate user.\n", username)
 		return false
 	}
 
-	u := &User{
-		Username: username,
-		Password: password,
-	}
+	// Save it to index
 	_, err = es_client.Index().
 		Index(INDEX).
 		Type(TYPE_USER).
 		Id(username).
-		BodyJson(u).
+		BodyJson(user).
 		Refresh(true).
 		Do()
 	if err != nil {
-		panic(err)
+		fmt.Printf("ES save failed %v\n", err)
 		return false
 	}
 
@@ -92,11 +97,15 @@ func addUser(username, password string) bool {
 // If signup is successful, a new session is created.
 func signupHandler(w http.ResponseWriter, r *http.Request) {
 	fmt.Println("Received one signup request")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Content-Type", "text/plain")
 
 	decoder := json.NewDecoder(r.Body)
 	var u User
 	if err := decoder.Decode(&u); err != nil {
-		panic(err)
+		m := fmt.Sprintf("Failed to parse body %v", r.Body)
+		fmt.Println(m)
+		http.Error(w, m, http.StatusBadRequest)
 		return
 	}
 
@@ -112,20 +121,21 @@ func signupHandler(w http.ResponseWriter, r *http.Request) {
 		fmt.Println("Empty password or username.")
 		http.Error(w, "Empty password or username", http.StatusInternalServerError)
 	}
-
-	w.Header().Set("Content-Type", "text/plain")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
 }
 
 
 // If login is successful, a new token is created.
 func loginHandler(w http.ResponseWriter, r *http.Request) {
 	fmt.Println("Received one login request")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Content-Type", "text/plain")
 
 	decoder := json.NewDecoder(r.Body)
 	var u User
 	if err := decoder.Decode(&u); err != nil {
-		panic(err)
+		m := fmt.Sprintf("Failed to parse body %v", r.Body)
+		fmt.Println(m)
+		http.Error(w, m, http.StatusBadRequest)
 		return
 	}
 
@@ -145,9 +155,6 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 		fmt.Println("Invalid password or username.")
 		http.Error(w, "Invalid password or username", http.StatusForbidden)
 	}
-
-	w.Header().Set("Content-Type", "text/plain")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
 }
 
 
