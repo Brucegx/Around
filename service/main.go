@@ -13,13 +13,13 @@ import (
 	"time"
     "cloud.google.com/go/bigtable"
 	"strings"
-	"os"
+	//"os"
 	//"github.com/rs/cors"
 	"github.com/pborman/uuid"
 	"github.com/auth0/go-jwt-middleware"
 	"github.com/dgrijalva/jwt-go"
 	"github.com/gorilla/mux"
-	"github.com/gorilla/handlers"
+	//"github.com/gorilla/handlers"
 	"github.com/go-redis/redis"
 	"cloud.google.com/go/storage"
 )
@@ -100,9 +100,17 @@ func main() {
 		},
 		SigningMethod: jwt.SigningMethodHS256,
 	})
+	// headersOk := handlers.AllowedHeaders([]string{"X-Requested-With","Content-Type"})
+	// originsOk := handlers.AllowedOrigins([]string{"Access-Control-Allow-Origin"})
+	// methodsOk := handlers.AllowedMethods([]string{"GET", "HEAD", "POST", "PUT", "OPTIONS"})
 
-	r.Handle("/post", jwtMiddleware.Handler(http.HandlerFunc(handlerPost))).Methods("POST")
-	r.Handle("/search", jwtMiddleware.Handler(http.HandlerFunc(handlerSearch))).Methods("GET")
+	// // start server listen
+	// // with error handling
+	
+	// http.ListenAndServe(":8080", handlers.CORS(originsOk, headersOk, methodsOk)(r))
+
+	r.Handle("/post", jwtMiddleware.Handler(http.HandlerFunc(handlerPost)))
+	r.Handle("/search", jwtMiddleware.Handler(http.HandlerFunc(handlerSearch)))
 	r.Handle("/login", http.HandlerFunc(loginHandler)).Methods("POST")
 	r.Handle("/signup", http.HandlerFunc(signupHandler)).Methods("POST")
 
@@ -113,14 +121,7 @@ func main() {
 
     // handler := c.Handler(r)
 	// http.ListenAndServe(":8080", handler)
-	headersOk := handlers.AllowedHeaders([]string{"X-Requested-With","Content-Type"})
-	originsOk := handlers.AllowedOrigins([]string{os.Getenv("ORIGIN_ALLOWED")})
-	methodsOk := handlers.AllowedMethods([]string{"GET", "HEAD", "POST", "PUT", "OPTIONS"})
-
-	// start server listen
-	// with error handling
 	
-	http.ListenAndServe(":8080", handlers.CORS(originsOk, headersOk, methodsOk)(r))
 	http.Handle("/", r)
 	log.Fatal(http.ListenAndServe(":8080", nil))
 }
